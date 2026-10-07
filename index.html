@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>폐기건 입고번호 정렬</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for client-side Excel processing -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Pretendard Font -->
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        poca: {
+                            DEFAULT: '#FF4D52', // POCA 코랄 레드/핑크 색상
+                            hover: '#E03C41',
+                            light: '#FFF0F1'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+        }
+
+        /* 구간별 파스텔톤 배경 스타일 */
+        .interval-1 { background-color: #ffe8e8 !important; } /* Pastel Red / Rose */
+        .interval-1:hover { background-color: #ffd8d8 !important; }
+
+        .interval-2 { background-color: #fff0e0 !important; } /* Pastel Orange / Peach */
+        .interval-2:hover { background-color: #ffe2c8 !important; }
+
+        .interval-3 { background-color: #fffde0 !important; } /* Pastel Yellow / Cream */
+        .interval-3:hover { background-color: #fffba8 !important; }
+
+        .interval-4 { background-color: #e8f8e8 !important; } /* Pastel Green / Mint */
+        .interval-4:hover { background-color: #d4f3d4 !important; }
+
+        .interval-5 { background-color: #e6f2ff !important; } /* Pastel Blue / Sky */
+        .interval-5:hover { background-color: #d2e6ff !important; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen p-4 sm:p-6 flex flex-col justify-between">
+
+    <div class="max-w-4xl mx-auto w-full space-y-4">
+        
+        <!-- Header & Total Count Badge -->
+        <div class="flex justify-between items-center bg-white px-5 py-3.5 rounded-2xl shadow-sm border border-slate-200">
+            <h1 class="text-lg font-bold text-slate-800 flex items-center gap-2.5">
+                <i class="fa-solid fa-recycle text-poca text-xl"></i>
+                <span>폐기건 입고번호 정렬</span>
+            </h1>
+            <span id="total-count-badge" class="text-sm font-bold bg-slate-900 text-white px-4 py-1.5 rounded-full shadow-sm">
+                총 폐기건 수: <span id="count-text" class="text-poca text-base font-extrabold ml-1">0건</span>
+            </span>
+        </div>
+
+        <!-- 1. Excel File Drag & Drop Upload Area (슬림형) -->
+        <div id="drop-zone" class="border-2 border-dashed border-poca/40 hover:border-poca bg-poca-light/50 rounded-2xl p-3.5 text-center cursor-pointer transition shadow-sm group relative overflow-hidden">
+            <input type="file" id="file-input" accept=".xlsx, .xls" class="hidden">
+            
+            <div class="flex items-center justify-center space-x-3">
+                <div class="w-10 h-10 bg-white text-poca rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-xs border border-poca/20">
+                    <i class="fa-solid fa-file-excel text-xl"></i>
+                </div>
+                <div class="text-left">
+                    <p class="text-sm font-bold text-slate-700">엑셀 파일(.xlsx, .xls)을 드래그하거나 클릭하여 업로드</p>
+                    <p class="text-xs text-slate-500">업로드 즉시 뒷 3자리 5구간 정렬 및 파스텔 색상 구분이 적용됩니다.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Transformed & Sorted Result Table -->
+        <div id="list-container" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hidden">
+            <div class="overflow-x-auto max-h-[calc(100vh-210px)] overflow-y-auto">
+                <table class="w-full text-sm text-left border-collapse">
+                    <thead class="bg-white text-slate-700 font-bold text-xs sticky top-0 z-10 border-b border-slate-200 shadow-xs">
+                        <tr>
+                            <th class="p-3.5 text-center w-16">순번</th>
+                            <th class="p-3.5 text-center">입고완료일</th>
+                            <th class="p-3.5 text-center">입고번호</th>
+                            <th class="p-3.5 text-right pr-8">반송 수량</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-slate-200/50">
+                        <!-- 정렬된 리스트 자동 출력 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Empty State Message -->
+        <div id="empty-state" class="bg-white rounded-2xl border border-slate-200 p-16 text-center text-slate-400">
+            <i class="fa-regular fa-folder-open text-4xl mb-3 text-slate-300"></i>
+            <p class="text-sm font-medium">업로드된 엑셀 파일이 없습니다. 상단 영역에 파일 올려주세요.</p>
+        </div>
+
+    </div>
+
+    <script>
+        let items = [];
+
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const listContainer = document.getElementById('list-container');
+        const emptyState = document.getElementById('empty-state');
+        const tableBody = document.getElementById('table-body');
+        const countText = document.getElementById('count-text');
+
+        // 뒷 3자리 5구간 정렬 함수
+        function getInterval(back3) {
+            if (back3 <= 199) return 1;
+            if (back3 <= 399) return 2;
+            if (back3 <= 599) return 3;
+            if (back3 <= 799) return 4;
+            return 5;
+        }
+
+        // 파일 드래그 앤 드롭 이벤트
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-poca', 'bg-poca-light');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-poca', 'bg-poca-light');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-poca', 'bg-poca-light');
+            if (e.dataTransfer.files.length) {
+                parseExcel(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                parseExcel(e.target.files[0]);
+            }
+        });
+
+        function parseExcel(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1 });
+
+                    if (!rawData || rawData.length < 2) {
+                        alert('엑셀 파일에 처리할 데이터가 없거나 올바르지 않습니다.');
+                        return;
+                    }
+
+                    processRows(rawData.slice(1));
+                } catch (err) {
+                    console.error(err);
+                    alert('엑셀 파일을 읽는 중 오류가 발생했습니다.');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function processRows(rows) {
+            const parsed = [];
+
+            rows.forEach((row, idx) => {
+                if (!row || row.length < 2 || row[1] === undefined || row[1] === null) return;
+
+                const dateVal = row[0] ? String(row[0]).trim().substring(0, 10) : '-';
+                const codeStr = String(row[1]).split('.')[0].trim().padStart(6, '0');
+                const qtyVal = row[2] !== undefined ? Number(row[2]) || 0 : 0;
+
+                const front3 = parseInt(codeStr.substring(0, 3), 10) || 0;
+                const back3 = parseInt(codeStr.substring(3, 6), 10) || 0;
+                const interval = getInterval(back3);
+
+                parsed.push({
+                    id: idx,
+                    date: dateVal,
+                    code: codeStr,
+                    qty: qtyVal,
+                    front3: front3,
+                    back3: back3,
+                    interval: interval
+                });
+            });
+
+            // 1순위: 구간 (1 -> 2 -> 3 -> 4 -> 5)
+            // 2순위: 앞 3자리 오름차순
+            // 3순위: 뒷 3자리 오름차순
+            parsed.sort((a, b) => {
+                if (a.interval !== b.interval) return a.interval - b.interval;
+                if (a.front3 !== b.front3) return a.front3 - b.front3;
+                return a.back3 - b.back3;
+            });
+
+            items = parsed;
+            render();
+        }
+
+        function render() {
+            countText.textContent = `${items.length}건`;
+
+            if (items.length === 0) {
+                emptyState.classList.remove('hidden');
+                listContainer.classList.add('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            listContainer.classList.remove('hidden');
+            tableBody.innerHTML = '';
+
+            items.forEach((item, index) => {
+                const tr = document.createElement('tr');
+                tr.className = `interval-${item.interval} transition-all select-none`;
+
+                tr.innerHTML = `
+                    <td class="p-3.5 text-center text-slate-500 font-bold text-xs">${index + 1}</td>
+                    <td class="p-3.5 text-center text-slate-700 font-medium">${item.date}</td>
+                    <td class="p-3.5 text-center font-mono font-bold text-slate-900 text-base code-text tracking-wide">${item.code}</td>
+                    <td class="p-3.5 text-right pr-8 font-bold text-slate-800">${item.qty.toLocaleString()}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+    </script>
+</body>
+</html>
